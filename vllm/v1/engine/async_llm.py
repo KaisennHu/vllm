@@ -1466,3 +1466,6 @@ class AsyncLLM(EngineClient):
 
     def get_kv_event_sources(self) -> dict[int, KVEventsConfig]:
         return self.engine_core.get_kv_event_sources()
+
+    async def get_kv_routing_capabilities(self) -> list[dict[str, Any]]:
+        return await self.engine_core.get_kv_routing_capabilities_async()

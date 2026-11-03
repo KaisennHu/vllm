@@ -72,6 +72,9 @@ class EngineClient(ABC):
         """KV-event publisher config of each engine, keyed by DP rank."""
         return {}
 
+    async def get_kv_routing_capabilities(self) -> list[dict[str, Any]]:
+        return []
+
     def check_admission(  # noqa: B027
         self, n: int = 1, request_id: str | None = None
     ) -> None:

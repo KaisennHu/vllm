@@ -290,6 +290,9 @@ class EngineCoreClient(ABC):
     async def get_supported_tasks_async(self) -> tuple[SupportedTask, ...]:
         raise NotImplementedError
 
+    async def get_kv_routing_capabilities_async(self) -> list[dict[str, Any]]:
+        return []
+
     async def add_request_async(self, request: EngineCoreRequest) -> None:
         raise NotImplementedError
 
@@ -1322,6 +1325,9 @@ class AsyncMPClient(MPClient):
                 for engine in self.core_engines
             ]
         )
+
+    async def get_kv_routing_capabilities_async(self) -> list[dict[str, Any]]:
+        return await self.call_utility_all_async("get_kv_routing_capability")
 
     async def call_utility_consensus_async(self, method: str, *args) -> Any:
         results = await self.call_utility_all_async(method, *args)

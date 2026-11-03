@@ -49,6 +49,11 @@ class KVEventsConfig:
     this topic to receive events.
     """
 
+    instance_topic: bool = False
+    """Give each ZMQ publisher a unique topic for its lifetime. Discover the
+    resolved topic through `/kv_event_sources`; do not hard-code it.
+    """
+
     def __post_init__(self):
         if self.publisher is None:
             self.publisher = "zmq" if self.enable_kv_cache_events else "null"

@@ -4,6 +4,7 @@
 import queue
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from collections import Counter, deque
 from collections.abc import Callable
@@ -347,6 +348,7 @@ class ZmqEventPublisher(EventPublisher):
         hwm: int = 100_000,
         max_queue_size: int = 100_000,
         topic: str = "",
+        instance_topic: bool = False,
     ) -> None:
         # Storage
         super().__init__(data_parallel_rank)
@@ -369,6 +371,8 @@ class ZmqEventPublisher(EventPublisher):
         # HWM/2 stale messages; 2x lets a full replay plus marker always fit.
         self._replay_hwm = 2 * (buffer_steps + 1)
         self._socket_setup()
+        if instance_topic:
+            topic = f"{topic}/instance-{uuid.uuid4().hex}"
         self._publisher_config = KVEventsConfig(
             enable_kv_cache_events=True,
             publisher="zmq",
@@ -378,6 +382,7 @@ class ZmqEventPublisher(EventPublisher):
             hwm=hwm,
             max_queue_size=max_queue_size,
             topic=topic,
+            instance_topic=instance_topic,
         )
 
         # Payload
@@ -603,6 +608,11 @@ class EventPublisherFactory:
 
         kind = config_dict.pop("publisher")
         config_dict.pop("enable_kv_cache_events")
+        instance_topic = config_dict.pop("instance_topic")
+        if instance_topic:
+            if kind != "zmq":
+                raise ValueError("instance_topic requires the ZMQ publisher")
+            config_dict["instance_topic"] = True
         try:
             constructor = cls._registry[kind]
         except KeyError as exc:
