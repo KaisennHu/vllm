@@ -10,8 +10,8 @@ import pytest
 import pytest_asyncio
 import requests
 from fastapi import Request
-
 from tests.utils import RemoteOpenAIServer
+
 from vllm import envs
 from vllm.v1.engine.exceptions import EngineDeadError
 from vllm.version import __version__ as VLLM_VERSION
@@ -88,6 +88,21 @@ async def test_show_version(server: RemoteOpenAIServer):
     assert payload["version"] == VLLM_VERSION
     if envs.VLLM_USE_RUST_FRONTEND:
         assert payload["rust_frontend_version"] == VLLM_VERSION
+
+
+def test_kv_routing_capabilities_exposes_engine_layout(server: RemoteOpenAIServer):
+    response = requests.get(server.url_for("kv_routing_capabilities"))
+    response.raise_for_status()
+    body = response.json()
+    assert body["schema_version"] == 1
+    assert len(body["ranks"]) == 1
+    rank = body["ranks"][0]
+    assert rank["rank"] == 0
+    assert rank["model"]
+    assert rank["hash_block_size"] > 0
+    assert rank["groups"]
+    assert all(group["block_size"] > 0 for group in rank["groups"])
+    assert all(isinstance(group["prefix_cacheable"], bool) for group in rank["groups"])
 
 
 @pytest.mark.asyncio

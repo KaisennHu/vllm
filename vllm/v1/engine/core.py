@@ -522,6 +522,78 @@ class EngineCore:
             )
         return metadata
 
+    def get_kv_routing_capability(self) -> dict[str, Any]:
+        """Describe this engine's cache and event source to a router."""
+        from vllm.distributed.kv_transfer.kv_connector.v1.base import supports_hma
+        from vllm.v1.core import kv_cache_utils
+
+        scheduler = cast(Any, self.scheduler)
+        config = getattr(scheduler, "kv_cache_config", None)
+        groups = self.get_kv_cache_group_metadata()
+        if config is not None:
+            for group, cache_group in zip(groups, config.kv_cache_groups, strict=True):
+                spec = cache_group.kv_cache_spec
+                try:
+                    tokens_per_state = str(spec.tokens_per_state)
+                except NotImplementedError:
+                    tokens_per_state = None
+                group.update(
+                    {
+                        "spec_type": type(spec).__name__,
+                        "prefix_cacheable": spec.prefix_cacheable,
+                        "prefix_replay_tokens": spec.prefix_replay_tokens,
+                        "tokens_per_state": tokens_per_state,
+                        "cache_role": getattr(spec, "cache_role", None),
+                        "mamba_cache_mode": getattr(spec, "mamba_cache_mode", None),
+                        "prefill_checkpoint_alignment": getattr(
+                            spec, "prefill_checkpoint_alignment", None
+                        ),
+                    }
+                )
+        publisher = scheduler.get_kv_event_publisher_config()
+        root_hash = getattr(kv_cache_utils, "NONE_HASH", None)
+        hash_algorithm = self.vllm_config.cache_config.prefix_caching_hash_algo
+        transfer_config = self.vllm_config.kv_transfer_config
+        parallel_config = self.vllm_config.parallel_config
+        connector = scheduler.get_kv_connector()
+        transfer = None
+        if transfer_config is not None:
+            transfer = {
+                "connector": transfer_config.kv_connector,
+                "role": transfer_config.kv_role,
+                "supports_hma": supports_hma(connector) if connector else False,
+                "group_ids": list(config.transfer_group_ids) if config else [],
+                "tensor_parallel_size": parallel_config.tensor_parallel_size,
+                "pipeline_parallel_size": parallel_config.pipeline_parallel_size,
+                "compatibility_hashes": getattr(
+                    self, "_kv_routing_transfer_hashes", []
+                ),
+            }
+        return {
+            "rank": parallel_config.data_parallel_index,
+            "model": self.vllm_config.model_config.model,
+            "weight_version": self._weight_version,
+            "weight_identity": envs.VLLM_KV_ROUTING_WEIGHT_ID,
+            "publisher_topic": publisher.topic if publisher else None,
+            "instance_topic": publisher.instance_topic if publisher else False,
+            "hash_algorithm": hash_algorithm,
+            "root_hash": (
+                root_hash.hex()
+                if self.vllm_config.cache_config.enable_prefix_caching
+                and hash_algorithm == "sha256_cbor"
+                and isinstance(root_hash, bytes)
+                and len(root_hash) == 32
+                else None
+            ),
+            "full_hashes": not envs.VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES,
+            "hash_block_size": getattr(scheduler, "hash_block_size", None),
+            "hash_lookahead_tokens": self.vllm_config.num_hash_lookahead_tokens,
+            "speculative_tokens": self.vllm_config.num_speculative_tokens,
+            "prefix_caching": self.vllm_config.cache_config.enable_prefix_caching,
+            "groups": groups,
+            "transfer": transfer,
+        }
+
     def add_request(self, request: Request, request_wave: int = 0):
         """Add request to the scheduler.
 
@@ -917,6 +989,7 @@ class EngineCore:
         # If a KV connector is initialized for scheduler, we want to collect
         # handshake metadata from all workers so the connector in the scheduler
         # will have the full context
+        self._kv_routing_transfer_hashes: list[str] = []
         kv_connector = self.scheduler.get_kv_connector()
         if kv_connector is not None:
             # Collect and store KV connector xfer metadata from workers
@@ -933,6 +1006,14 @@ class EngineCore:
                 for worker_dict in xfer_handshake_metadata:
                     if worker_dict is not None:
                         content.update(worker_dict)
+                hashes = [
+                    getattr(metadata, "compatibility_hash", None)
+                    for metadata in content.values()
+                ]
+                if hashes and all(isinstance(value, str) and value for value in hashes):
+                    self._kv_routing_transfer_hashes = sorted(
+                        {value for value in hashes if isinstance(value, str)}
+                    )
                 kv_connector.set_xfer_handshake_metadata_pp_aware(content)
 
     def _reset_caches(

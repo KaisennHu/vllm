@@ -57,6 +57,32 @@ def test_basic_publishing(publisher, subscriber):
         assert event.value == f"test-{i}", "Event value mismatch"
 
 
+def test_instance_topic_changes_on_publisher_restart(publisher_config):
+    from .conftest import MockSubscriber
+
+    publisher_config.instance_topic = True
+    publisher = EventPublisherFactory.create(publisher_config, DP_RANK)
+    first = publisher.get_publisher_config()
+    assert first is not None
+    assert first.instance_topic
+    assert first.topic.startswith("test/instance-")
+    subscriber = MockSubscriber(publisher_config.endpoint, None, first.topic)
+    try:
+        publisher.publish(create_test_events(1))
+        assert subscriber.receive_one(timeout=1000) is not None
+    finally:
+        subscriber.close()
+        publisher.shutdown()
+
+    publisher = EventPublisherFactory.create(publisher_config, DP_RANK)
+    try:
+        second = publisher.get_publisher_config()
+        assert second is not None
+        assert second.topic != first.topic
+    finally:
+        publisher.shutdown()
+
+
 def test_multiple_events(publisher, subscriber):
     """Test publishing and receiving multiple event batches."""
     for _ in range(10):
