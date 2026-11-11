@@ -3371,20 +3371,19 @@ class Scheduler(SchedulerInterface):
         num_running, num_waiting = self.get_request_counts()
         num_deferred = len(self.deferred_waiting)
         # Remaining prefill work for routing consumers: confirmed compute for
-        # running requests, prompt length for queued ones. Dispatched but
-        # unconfirmed tokens are not counted as work already done.
+        # running requests only. Queued requests are excluded because their
+        # cache reuse is unknown, so their prompt length overstates the work.
         remaining_running = sum(
             max(0, r.num_tokens - max(0, r.num_computed_tokens - r.num_in_flight_tokens))
             for r in self.running
         )
-        remaining_waiting = sum(r.num_tokens for r in self.waiting)
         self._prefill_sample_seq += 1
         return SchedulerStats(
             num_running_reqs=num_running,
             num_waiting_reqs=num_waiting - num_deferred,
             num_skipped_waiting_reqs=num_deferred,
             num_kv_fetch_reqs_by_stage=self._kv_fetch_counts.copy(),
-            remaining_prefill_tokens=remaining_running + remaining_waiting,
+            remaining_prefill_tokens=remaining_running,
             prefill_sample_seq=self._prefill_sample_seq,
             kv_cache_usage=self.kv_cache_manager.usage,
             prefix_cache_stats=prefix_cache_stats,
